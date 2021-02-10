@@ -7,13 +7,13 @@ _here = os.path.abspath(os.path.dirname(__file__))
 with open(os.path.join(_here, 'README.md'), encoding='utf-8') as f:
     long_description = f.read()
 
-version = {}
-with open(os.path.join(_here, 'copra', 'version.py')) as f:
-    exec(f.read(), version)
+# version = {}
+# with open(os.path.join(_here, 'copra', 'version.py')) as f:
+#     exec(f.read(), version)
 
 setup(
     name='copra',
-    version=version['__version__'],
+    version='0.1.1',
     description=('Construction of Proxy Record Age Models'),
     long_description=long_description,
     author='Bedartha Goswami',
