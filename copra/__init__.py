@@ -1,1 +1,2 @@
-# agemodels and  proxyrecords get imported anyway, so I leave this blank
+from . import agemodels
+from . import proxyrecords
