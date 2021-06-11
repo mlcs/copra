@@ -6,8 +6,8 @@ dated sedimentary archives. The method in [1] is essentially a numerical
 conceptualisation of the analytical proxy uncertainties derived in [2]. 
 
 The current implementation seeks to extend some of the key aspects:
-[] Radiocarbon dating calibration (NOT IMPLEMENTED)
-[x] Final proxy record models on a regularly spaced time axis
+- [ ] Radiocarbon dating calibration (NOT IMPLEMENTED)
+- [x] Final proxy record models on a regularly spaced time axis
 
 # References
 
