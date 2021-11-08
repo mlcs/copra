@@ -15,7 +15,7 @@ Age Models (COPRA) (2012),_Climate of the Past_, 8, 1765–1779
 
 """
 # Created: Sun Sep 20, 2020  08:26pm 
-# Last modified: Tue Jun 08, 2021  11:26pm
+# Last modified: Fri Oct 29, 2021  09:52am
 #
 # Copyright (C) 2020  Bedartha Goswami <bedartha@gmail.com> This program is
 # free software: you can redistribute it and/or modify it under the terms of
@@ -71,9 +71,9 @@ def agemodels(age, proxy, nens, max_iter=10000,
     Returns
     -------
     agemodels : pandas.DataFrame
-                dataframe with nens + 1 columns; the first column "Depth" has
+                dataframe with nens + 1 columns; the first column "depth" has
                 the same depth values as in proxy["depth"], the remaining
-                columns "Age Model N", where N is the N-th age model contains
+                columns "age model N", where N is the N-th age model contains
                 the corresponding age for each depth
 
     """
@@ -157,14 +157,14 @@ def agemodels(age, proxy, nens, max_iter=10000,
     agemods = np.array(agemods, dtype="float")
 
     # create dataframe for age model ensemble
-    names = ["Depth"]
-    names.extend(["Age Model %d" % (i + 1) for i in range(ES)])
+    names = ["depth"]
+    names.extend(["age model %d" % (i + 1) for i in range(ES)])
     agemodels = pd.DataFrame(np.c_[pz.T, agemods.T], columns=names)
 
     return agemodels
 
 
-def proxyrecords(agemodels, proxy, ageres=10):
+def proxyrecords(agemodels, proxy, ageres=10, agelims=None):
     """
     Estimates proxy record ensemble from given age model ensemble
 
@@ -182,13 +182,18 @@ def proxyrecords(agemodels, proxy, ageres=10):
     ageres : int
              integer specifying the sampling frequency along the time axis for
              the final proxy records; default is 10, i.e. every 10 years
+    agelims : list, tuple, or array-like
+              pair of values specifying the start and end of the age axis in
+              the form `(start age, end age)`. The resulting age array will be
+              created as a regular linearly spaced grid between `start age` and
+              `end age` (inclusive) with a spacing of `ageres`.
 
     Returns
     -------
     proxyrecs : pandas.DataFrame
-                dataframe with nens + 1 columns; the first column "Age" has
+                dataframe with nens + 1 columns; the first column "age" has
                 the age sampled every ``ageres`` years, the remaining
-                columns "Proxy Record N", where N is the N-th age model contains
+                columns "proxy record N", where N is the N-th age model contains
                 the corresponding proxy value for each sampled age. NaNs
                 signify those proxy values where the corresponding sampled age
                 lie outside the age range of that particular age model.
@@ -197,7 +202,7 @@ def proxyrecords(agemodels, proxy, ageres=10):
     """
     # extract data to numpy arrays for convenience
     ## age models
-    az = agemodels["Depth"].to_numpy()
+    az = agemodels["depth"].to_numpy()
     aa = agemodels[agemodels.columns[1:]].to_numpy().T
     ES = aa.shape[0]
     ## proxy measurements
@@ -212,7 +217,14 @@ def proxyrecords(agemodels, proxy, ageres=10):
     assert len(az) == n_pm, "Age models lengths are different from proxy"
 
     # create regularly spaced age array
-    age = np.arange(np.floor(aa.min()), np.ceil(aa.max()), 10)
+    if agelims == None:
+        start_age, end_age = np.floor(aa.min()), np.ceil(aa.max())
+    elif len(agelims) == 2:
+        start_age, end_age = agelims[0], agelims[1]
+    else:
+        raise "Error: Limits of age axis incorrectly specified!"
+    end_age += 0.1 * ageres         # add buffer to include the end_age value
+    age = np.arange(start_age, end_age, ageres)
 
     # loop over age models and interpolate the proxy record on regular grid
     prxrec = np.zeros((ES, len(age)))
@@ -224,8 +236,8 @@ def proxyrecords(agemodels, proxy, ageres=10):
         prxrec[i] = f_pz(curr_depth)
 
     # create dataframe for the proxy record ensemble
-    names = ["Age"]
-    names.extend(["Proxy Record %d" % (i + 1) for i in range(ES)])
+    names = ["age"]
+    names.extend(["proxy record %d" % (i + 1) for i in range(ES)])
     proxyrecords = pd.DataFrame(np.c_[age.T, prxrec.T], columns=names)
 
     return proxyrecords
