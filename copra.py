@@ -15,7 +15,7 @@ Age Models (COPRA) (2012),_Climate of the Past_, 8, 1765–1779
 
 """
 # Created: Sun Sep 20, 2020  08:26pm 
-# Last modified: Tue Nov 09, 2021  09:20am
+# Last modified: Tue Nov 09, 2021  10:59am
 #
 # Copyright (C) 2020  Bedartha Goswami <bedartha@gmail.com> This program is
 # free software: you can redistribute it and/or modify it under the terms of
@@ -39,7 +39,8 @@ import numpy as np
 
 from scipy.interpolate import interp1d
 
-
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import ConstantKernel, RBF
 
 
 def agemodels(age, proxy, nens, max_iter=10000,
@@ -101,7 +102,7 @@ def agemodels(age, proxy, nens, max_iter=10000,
         extrapolate = True
 
     # use a while loop to obtain required number of ensemble members
-    print("while loop ...")
+    print("estimating age models ...")
     ## parse args
     ES = nens
     MAXITER = max_iter
@@ -164,7 +165,7 @@ def agemodels(age, proxy, nens, max_iter=10000,
     return agemodels
 
 
-def proxyrecords(agemodels, proxy, ageres=10, agelims=None):
+def proxyens(agemodels, proxy, ageres=10, agelims=None, nan_policy="strict"):
     """
     Estimates proxy record ensemble from given age model ensemble
 
@@ -190,13 +191,13 @@ def proxyrecords(agemodels, proxy, ageres=10, agelims=None):
 
     Returns
     -------
-    proxyrecs : pandas.DataFrame
-                dataframe with nens + 1 columns; the first column "age" has
-                the age sampled every ``ageres`` years, the remaining
-                columns "proxy record N", where N is the N-th age model contains
-                the corresponding proxy value for each sampled age. NaNs
-                signify those proxy values where the corresponding sampled age
-                lie outside the age range of that particular age model.
+    proxyens : pandas.DataFrame
+               dataframe with nens + 1 columns; the first column "age" has
+               the age sampled every ``ageres`` years, the remaining
+               columns "proxy record N", where N is the N-th age model contains
+               the corresponding proxy value for each sampled age. NaNs
+               signify those proxy values where the corresponding sampled age
+               lie outside the age range of that particular age model.
 
 
     """
@@ -223,7 +224,7 @@ def proxyrecords(agemodels, proxy, ageres=10, agelims=None):
         start_age, end_age = agelims[0], agelims[1]
     else:
         raise "Error: Limits of age axis incorrectly specified!"
-    end_age += 0.1 * ageres         # add buffer to include the end_age value
+    end_age += 0.0001 * ageres         # add buffer to include the end_age value
     age = np.arange(start_age, end_age, ageres)
 
     # loop over age models and interpolate the proxy record on regular grid
@@ -235,12 +236,66 @@ def proxyrecords(agemodels, proxy, ageres=10, agelims=None):
         curr_depth = f_za(age)
         prxrec[i] = f_pz(curr_depth)
 
+    # implement NaN policy
+    len_age = len(age)
+    percent_nans = (np.isnan(prxrec).sum(axis=0) * 100) / ES
+    nan_policy_opts = {
+                        "strict": 0,
+                        "moderate": 5,
+                        "relaxed": 10,
+                        "easygoing": 25,
+                        "none": 100,
+            }
+    nonan_idx = np.where(percent_nans <= nan_policy_opts[nan_policy])[0]
+    prxrec = prxrec[:, nonan_idx]
+    age = age[nonan_idx]
+    if len(nonan_idx) < len_age:
+        print("Warning: Some proxy depths were outside of age model depths.")
+        print("\tThese values were assigned NaN values.")
+        print("\tRemoving times with NaNs as per 'nan_policy = %s'" % nan_policy)
+        print("\tPrescribed age limits (BP) = (%.1f, %.1f)" % (start_age, end_age))
+        print("\tFinal age limits (BP) = (%.1f, %.1f)" % (age[0], age[-1]))
+        if nan_policy != "strict":
+            print("Warning: Chance of up to %d %% of records with NaNs" \
+                    % nan_policy_opts[nan_policy])
+
+
     # create dataframe for the proxy record ensemble
     names = ["age"]
     names.extend(["proxy record %d" % (i + 1) for i in range(ES)])
-    proxyrecords = pd.DataFrame(np.c_[age.T, prxrec.T], columns=names)
 
-    return proxyrecords
+    return pd.DataFrame(np.c_[age.T, prxrec.T], columns=names)
+
+
+def proxygp(proxyens):
+    """
+    Returns a Gaussian Process approximation of the proxy ensemble#
+    """
+    x = proxyens["age"].to_numpy()
+    y = np.nanmean(proxyens.iloc[:, 1:].to_numpy(), axis=1)
+    sigma_n = np.nanstd(proxyens.iloc[:, 1:].to_numpy(), axis=1)
+
+    # define kernel hyper-parameters
+    l = np.nanmean(np.diff(x))
+    sigma_f = (np.nanmax(y) - np.nanmin(y)) ** 2
+
+    # define kernel object
+    kernel1 = ConstantKernel(constant_value=sigma_f,
+                             constant_value_bounds=(1e-3, 1e3))
+    kernel2 = RBF(length_scale=l, length_scale_bounds=(1e-3, 1e3))
+    kernel = kernel1 * kernel2
+
+    # define GP regressor object
+    gp = GaussianProcessRegressor(kernel=kernel, alpha=sigma_n ** 2,
+                                  optimizer=None)
+
+    # format data shapes for the regressor
+    X = x.reshape(len(x), 1)
+
+    # fit to observations
+    gp.fit(X, y)
+
+    return gp
 
 
 def synthcore(M=10, K=1000, ae_top=1, ae_bot=500, ae_incr="linear"):
@@ -253,14 +308,7 @@ def synthcore(M=10, K=1000, ae_top=1, ae_bot=500, ae_incr="linear"):
         """
         # simulate core growth as a monotonic logistic function
         print("simulate logistic growth of sedimentary archive ...")
-        # N = 5000
         z = np.linspace(0., zmax, N)
-        # growth_params = {
-        #         "L": 11000.,     # maximum possible age
-        #         "z0": 100.,      # depth value for growth midpoint
-        #         "k": 5E-2,       # steepness of growth
-        #         }
-        # z0, L, k = growth_params["z0"], growth_params["L"], growth_params["k"]
         a = Amax / (1. + np.exp(-k * (z - z0)))
         age_true, depth_true = a, z
 
